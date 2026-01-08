@@ -7,22 +7,24 @@
 
 struct Cluster { // better than class for data
     float L, a, b; // CIELAB colors
-    int x, y;
-    Cluster(float L_, float a_, float b_, int x_, int y_)
-        : L(L_), a(a_), b(b_), x(x_), y(y_) {}
+    int x, y; // center coords
+    int label;
+    Cluster(int label_, float L_, float a_, float b_, int x_, int y_)
+        : label(label_), L(L_), a(a_), b(b_), x(x_), y(y_) {}
 };
+
+
+int compute_s(int rows, int cols, int k){
+    return std::max(double(1), std::min(floor(cols/sqrt(k)),floor(rows/sqrt(k))));    
+}
 
 
 
 std::vector<Cluster> init_clusters(const cv::Mat& laplacian,
-                                    const cv::Mat& labf, int k){
+                                    const cv::Mat& labf, int k, int S){
 
-    const int r = laplacian.rows; // if can be const then it must be const
+    const int r = laplacian.rows;
     const int c = laplacian.cols;
-
-    // find size for sampling pixels at regular grid steps S
-    const int sr = std::max(double(1), floor(r/sqrt(k))); // probably we will have r=c
-    const int sc = std::max(double(1), floor(c/sqrt(k)));
 
     constexpr std::array<std::pair<int,int>, 9> neigh3x3 = {{
     {-1,-1}, {-1,0}, {-1,1},
@@ -33,9 +35,10 @@ std::vector<Cluster> init_clusters(const cv::Mat& laplacian,
 
     std::vector<Cluster> clusters;
     clusters.reserve(k);
+    int cluster_label{};
 
-    for (int x = sr/2; x < r && clusters.size() < k; x += sr) {
-        for (int y = sc/2; y < c && clusters.size() < k; y += sc) {
+    for (int x = S/2; x < r && clusters.size() < k; x += S) {
+        for (int y = S/2; y < c && clusters.size() < k; y += S) {
             
             int xk = x;
             int yk = y;
@@ -58,7 +61,9 @@ std::vector<Cluster> init_clusters(const cv::Mat& laplacian,
             float a = lab[1];
             float b = lab[2];
             
-            clusters.emplace_back(L, a, b, xk, yk); // emplace_back(args...) <=> constructeur T(args...)
+            clusters.emplace_back(cluster_label, L, a, b, xk, yk); // emplace_back(args...) <=> constructeur T(args...)
+
+            cluster_label++;
         }
     }
     return clusters;
@@ -90,7 +95,6 @@ cv::Mat gradient_map(const std::string& img_path){ // useful for clusters init
     return abs_lap;
 }
 
-
 Eigen::MatrixXf lab_to_grid(const cv::Mat& lab){
     Eigen::MatrixXf grid(lab.rows, lab.cols);
     return grid;
@@ -98,30 +102,93 @@ Eigen::MatrixXf lab_to_grid(const cv::Mat& lab){
 
 
 
-float D(Cluster c, int xi, int yi, float Li, float ai, float bi){
+float compute_distance(Cluster c, int xi, int yi, float Li, float ai, float bi, int S){
     float dc2 = pow(c.L - Li,2) + pow(c.a - ai,2) + pow(c.b - bi, 2);
     float ds2 = pow(c.x - xi,2) + pow(c.y - yi, 2);
 
     int m = 10; // can be [1,40] when working with CIELAB
-    float S; // sqrt(N/K) what is used in init
 
     float D = sqrt(dc2 + ((ds2 / pow(S,2)) * pow(m,2)));
 
     return D;
 }
 
+float L2_norm(){ // L2 norm is used to compute a residual error E
+    return 0;
+}
+
+
+float update_clusters(std::vector<Cluster>& clusters, cv::Mat& labf,
+                    Eigen::MatrixXf& labels, Eigen::MatrixXf& distance) // will return the residual error E 
+{
+    /* for each pixel somme cluster correspondant
+    keep how much pixels in each clusters et hop on divise. */
+
+    const int r = labels.rows();
+    const int c = labels.cols();
+    
+    std::vector<int> pixel_per_cluster(clusters.size(), 0);
+
+    
+
+    for (int x = 0; x < r; x++) {
+        for (int y = 0; y < c; y++){
+
+        }
+    }
+
+
+
+
+
+
+
+    float E; // residual Eror 
+    return E;
+}
 
 
 /* runs one iteration of the algorithm and returns the residual error */
-float slic(const std::vector<Cluster>& clusters,
+float slic(std::vector<Cluster>& clusters,
+        cv::Mat& labf,
         Eigen::MatrixXf& labels,
-        Eigen::MatrixXf& distance)
+        Eigen::MatrixXf& distance,
+        int S)
 { 
+    const int r = labels.rows();
+    const int c = labels.cols();
+
+    /* Assignment */
+    for (Cluster& cluster : clusters){ // for each cluster center Ck
+        int xk = cluster.x;
+        int yk = cluster.y;
+        for (int xi = xk - S; xi < xk + S; xi++) { // for each pixel i in a 2S × 2S region around Ck
+            for (int yi = yk - S; yi < yk+S; yi++) {
+                cv::Vec3f lab = labf.at<cv::Vec3f>(yi, xi);
+                float Li = lab[0]; 
+                float ai = lab[1];
+                float bi = lab[2]; // get pixel colors
+
+                float D = compute_distance(cluster, xi, yi, Li, ai, bi, S);
+
+                if (D < distance(yi, xi)){
+                    distance(yi, xi) = D;
+                    labels(yi, xi) = cluster.label;
+                }
+            }
+        }
+    }
+    
+    
+    /* Update */
+    // compute new cluster centers update step adjusts the cluster centers to be the mean
+    // [l a b x y] vector of all the pixels belonging to the cluster
+
+    // compute residual error E
+    // L2 norm is used to compute a residual error E between the new cluster center locations
+    // and previous cluster center locations
+
     float E;
-
-
-
-
     return E;
 }
 
@@ -136,9 +203,14 @@ int main() {
     const cv::Mat laplacian = gradient_map(image_path);
     if (labf.empty()) return -1;
 
+    const int r = laplacian.rows; // if can be const then it must be const
+    const int c = laplacian.cols;
+
     const int n_pixels = 100; // k
-    // Initialise cluster centers Ck, clusters will not change as the algorithm runs
-    const std::vector<Cluster> clusters = init_clusters(laplacian, labf, n_pixels);
+    const int S = compute_s(r, c, n_pixels); // find size for sampling pixels at regular grid steps S
+
+    // Initialise cluster centers Ck, clusters will change their centers as the algorithm runs
+    std::vector<Cluster> clusters = init_clusters(laplacian, labf, n_pixels, S);
 
     // Label and Distance map to track l(i) and d(i)
     Eigen::MatrixXf labels = lab_to_grid(labf);
@@ -150,7 +222,7 @@ int main() {
     const float threshold = 1e-4; // fix later
     float E = 42; // residual error
     while (E > threshold){
-        E = slic(clusters, labels, distance);
+        // E = slic();
     }
 
 
