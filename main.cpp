@@ -118,39 +118,70 @@ float L2_norm(){ // L2 norm is used to compute a residual error E
 }
 
 
-float update_clusters(std::vector<Cluster>& clusters, cv::Mat& labf,
-                    Eigen::MatrixXf& labels, Eigen::MatrixXf& distance) // will return the residual error E 
+float update_clusters(std::vector<Cluster>& clusters, const cv::Mat& labf, // may need to optimize later
+                    Eigen::MatrixXf& labels) // will return the residual error E 
 {
     /* for each pixel somme cluster correspondant
     keep how much pixels in each clusters et hop on divise. */
 
     const int r = labels.rows();
     const int c = labels.cols();
-    
-    std::vector<int> pixel_per_cluster(clusters.size(), 0);
 
+    const int n_clusters = clusters.size();
     
+    std::vector<int> pixel_per_cluster(n_clusters, 0);
+
+    std::vector<Cluster> newClusters;
+    newClusters.reserve(n_clusters);
+    for (int i = 0; i < n_clusters; i++){
+        newClusters.emplace_back(i,0,0,0,0,0);
+    }
 
     for (int x = 0; x < r; x++) {
         for (int y = 0; y < c; y++){
+            pixel_per_cluster[labels(y, x)]++;
+            cv::Vec3f lab = labf.at<cv::Vec3f>(y, x);
+            newClusters[labels(y, x)].L += lab[0];
+            newClusters[labels(y, x)].a += lab[1];
+            newClusters[labels(y, x)].b += lab[2];
+            newClusters[labels(y, x)].x += x;
+            newClusters[labels(y, x)].y += y;
 
         }
     }
 
+    for (Cluster cluster : newClusters){
+        if (pixel_per_cluster[cluster.label]==0) throw std::runtime_error("cluster has zero pixels");
+        int pix = pixel_per_cluster[cluster.label];
+        cluster.x = cluster.x / pix; // cluster.label sould never be empty (I hope)
+        cluster.y = cluster.y / pix;
+        cluster.L = cluster.L / pix;
+        cluster.a = cluster.a / pix;
+        cluster.b = cluster.b / pix;
+    }
 
 
 
+    float E{}; // L2 norm is used to compute a residual error E between the new/old cluster center locations
+    for (int i = 0; i < n_clusters; i++){
+        E += std::sqrt(
+            (clusters[i].L - newClusters[i].L) * (clusters[i].L - newClusters[i].L)
+            + (clusters[i].a - newClusters[i].a) * (clusters[i].a - newClusters[i].a)
+            + (clusters[i].b - newClusters[i].b) * (clusters[i].b - newClusters[i].b)
+            + (clusters[i].x - newClusters[i].x) * (clusters[i].x - newClusters[i].x)
+            + (clusters[i].y - newClusters[i].y) * (clusters[i].y - newClusters[i].y)
+        );
+    }
 
+    clusters = newClusters; // assignation
 
-
-    float E; // residual Eror 
     return E;
 }
 
 
 /* runs one iteration of the algorithm and returns the residual error */
 float slic(std::vector<Cluster>& clusters,
-        cv::Mat& labf,
+        const cv::Mat& labf,
         Eigen::MatrixXf& labels,
         Eigen::MatrixXf& distance,
         int S)
@@ -179,19 +210,28 @@ float slic(std::vector<Cluster>& clusters,
         }
     }
     
-    
     /* Update */
-    // compute new cluster centers update step adjusts the cluster centers to be the mean
-    // [l a b x y] vector of all the pixels belonging to the cluster
-
-    // compute residual error E
-    // L2 norm is used to compute a residual error E between the new cluster center locations
-    // and previous cluster center locations
-
-    float E;
+    // compute new cluster centers update step adjusts the cluster centers to be the mean [l a b x y] of pixels in cluster
+    float E = update_clusters(clusters, labf, labels);  // residual error
+    
     return E;
 }
 
+
+
+cv::Mat render_output(const cv::Mat& labf,
+                    const Eigen::MatrixXf& labels) // actually maybe not const
+{
+    // cv::convexHull surement pour commencer
+    // need to fix  pixels that do not belong to the same connected component as their cluster center may remain (C. Post Processing section)
+    // draw a 1px border around each cluster
+
+
+    
+    
+    cv::Mat output_image;
+    return output_image;
+}
 
 
 
@@ -219,13 +259,11 @@ int main() {
     distance.setConstant(INFINITY);
 
     //Slic
-    const float threshold = 1e-4; // fix later
+    const float threshold = 1e-2; // fix later
     float E = 42; // residual error
     while (E > threshold){
-        // E = slic();
+        E = slic(clusters, labf, labels, distance, S);
     }
-
-
 
     // render final image
     cv::Mat output_image;
