@@ -4,6 +4,10 @@
 #include <cmath>
 #include <string>
 #include <algorithm>
+#include <array>
+#include <vector>
+#include <stdexcept>
+
 
 struct Cluster { // better than class for data
     float L, a, b; // CIELAB colors
@@ -15,7 +19,8 @@ struct Cluster { // better than class for data
 
 
 int compute_s(int rows, int cols, int k){
-    return std::max(double(1), std::min(floor(cols/sqrt(k)),floor(rows/sqrt(k))));    
+    if (k <= 0) return 1; // division 0 not good :(
+    return std::max(1, (int)std::floor(std::sqrt((rows * cols) / (double)k)));
 }
 
 
@@ -37,17 +42,19 @@ std::vector<Cluster> init_clusters(const cv::Mat& laplacian,
     clusters.reserve(k);
     int cluster_label{};
 
-    for (int x = S/2; x < r && clusters.size() < k; x += S) {
-        for (int y = S/2; y < c && clusters.size() < k; y += S) {
+    for (int x = S/2; x < c && clusters.size() < k; x += S) { 
+        for (int y = S/2; y < r && clusters.size() < k; y += S) {
             
             int xk = x;
             int yk = y;
+            
             float lowest_gradient = laplacian.at<float>(y, x);
             // Move (x,y) to lowest gradient position in 3x3 neighborhood,
             // assume it stays in grid
             for (const std::pair<int,int>& p : neigh3x3){
                 int nx = x + p.first;
                 int ny = y + p.second;
+                if (nx < 0 || nx >= r || ny < 0 || ny >= c) continue; // bounds
                 float curr_gradient = laplacian.at<float>(y, x);
                 
                 if (curr_gradient < lowest_gradient){
@@ -66,15 +73,22 @@ std::vector<Cluster> init_clusters(const cv::Mat& laplacian,
             cluster_label++;
         }
     }
+
+    for (Cluster& cluster : clusters){
+        cluster.x = std::min(labf.cols - 1, std::max(0, cluster.x));
+        cluster.y = std::min(labf.rows - 1, std::max(0, cluster.y));
+    }
     return clusters;
+
 }
 
 
 
 /* Loads image into CIELAB format from file path */
 cv::Mat img_to_labf(const std::string& img_path){ // "image.png"
-    cv::Mat img = cv::imread(img_path, cv::IMREAD_COLOR_BGR);
-    
+    cv::Mat img = cv::imread(img_path, cv::IMREAD_COLOR);
+    if (img.empty()) return cv::Mat();
+
     cv::Mat lab;
     cv::cvtColor(img, lab, cv::COLOR_BGR2Lab);
     
@@ -88,11 +102,10 @@ cv::Mat gradient_map(const std::string& img_path){ // useful for clusters init
     cv::Mat img = cv::imread(img_path, cv::IMREAD_GRAYSCALE);
     CV_Assert(!img.empty());
 
-    cv::Mat lap, abs_lap;
+    cv::Mat lap;
     cv::Laplacian(img, lap, CV_32F, 3);
-    cv::convertScaleAbs(lap, abs_lap);
 
-    return abs_lap;
+    return cv::abs(lap);
 }
 
 Eigen::MatrixXf lab_to_grid(const cv::Mat& lab){
@@ -124,8 +137,8 @@ float update_clusters(std::vector<Cluster>& clusters, const cv::Mat& labf, // ma
     /* for each pixel somme cluster correspondant
     keep how much pixels in each clusters et hop on divise. */
 
-    const int r = labels.rows();
-    const int c = labels.cols();
+    const int r = labels.cols();
+    const int c = labels.rows(); // inversion ok 
 
     const int n_clusters = clusters.size();
     
@@ -139,7 +152,11 @@ float update_clusters(std::vector<Cluster>& clusters, const cv::Mat& labf, // ma
 
     for (int x = 0; x < r; x++) {
         for (int y = 0; y < c; y++){
-            pixel_per_cluster[labels(y, x)]++;
+
+            int lbl = (int)labels(y, x);
+            if (lbl < 0 || lbl >= n_clusters) continue;
+            pixel_per_cluster[lbl]++;
+
             cv::Vec3f lab = labf.at<cv::Vec3f>(y, x);
             newClusters[labels(y, x)].L += lab[0];
             newClusters[labels(y, x)].a += lab[1];
@@ -150,8 +167,11 @@ float update_clusters(std::vector<Cluster>& clusters, const cv::Mat& labf, // ma
         }
     }
 
-    for (Cluster cluster : newClusters){
-        if (pixel_per_cluster[cluster.label]==0) throw std::runtime_error("cluster has zero pixels");
+    for (Cluster& cluster : newClusters){
+        if (pixel_per_cluster[cluster.label]==0){
+            cluster = clusters[cluster.label];
+            continue;
+        }
         int pix = pixel_per_cluster[cluster.label];
         cluster.x = cluster.x / pix; // cluster.label sould never be empty (I hope)
         cluster.y = cluster.y / pix;
@@ -189,13 +209,18 @@ float slic(std::vector<Cluster>& clusters,
     const int r = labels.rows();
     const int c = labels.cols();
 
+    distance.setConstant(INFINITY);
     /* Assignment */
     for (Cluster& cluster : clusters){ // for each cluster center Ck
         int xk = cluster.x;
         int yk = cluster.y;
-        for (int xi = xk - S; xi < xk + S; xi++) { // for each pixel i in a 2S × 2S region around Ck
-            for (int yi = yk - S; yi < yk+S; yi++) {
+        
+        // for each pixel i in a 2S × 2S region around Ck
+        for (int xi = std::max(0, xk - S); xi < std::min(c, xk + S); xi++) {
+            for (int yi = std::max(0, yk - S); yi < std::min(r, yk + S); yi++) {
+                if ((unsigned)yi >= (unsigned)r || (unsigned)xi >= (unsigned)c) continue;
                 cv::Vec3f lab = labf.at<cv::Vec3f>(yi, xi);
+
                 float Li = lab[0]; 
                 float ai = lab[1];
                 float bi = lab[2]; // get pixel colors
@@ -225,12 +250,23 @@ cv::Mat render_output(const cv::Mat& labf,
     // cv::convexHull surement pour commencer
     // need to fix  pixels that do not belong to the same connected component as their cluster center may remain (C. Post Processing section)
     // draw a 1px border around each cluster
+    cv::Mat output_image = labf.clone();
+    const int rows = output_image.rows;
+    const int cols = output_image.cols;
 
-
-    
-    
-    cv::Mat output_image;
-    return output_image;
+    for (int y = 0; y < rows-1; y++){
+        for (int x = 0; x < cols-1; x++){
+            int l = labels(y, x);
+            if (l != labels(y+1, x) || l != labels(y, x+1)){
+                output_image.at<cv::Vec3f>(y, x) = cv::Vec3f(0.0, 0.0, 0.0);
+            }
+        }
+    }
+    // convert back labf to bgr
+    cv::Mat lab8, bgr;
+    output_image.convertTo(lab8, CV_8UC3);
+    cv::cvtColor(lab8, bgr, cv::COLOR_Lab2BGR);
+    return bgr;
 }
 
 
@@ -238,7 +274,7 @@ cv::Mat render_output(const cv::Mat& labf,
 
 int main() {
     // loading image
-    std::string image_path = "image.png";
+    std::string image_path = "banana.png";
     const cv::Mat labf = img_to_labf(image_path); // can access it fast just to get values, it will not change
     const cv::Mat laplacian = gradient_map(image_path);
     if (labf.empty()) return -1;
@@ -259,14 +295,15 @@ int main() {
     distance.setConstant(INFINITY);
 
     //Slic
-    const float threshold = 1e-2; // fix later
-    float E = 42; // residual error
+    const float threshold = 5; // fix later also f(image size)
+    float E = threshold+1; // residual error
     while (E > threshold){
         E = slic(clusters, labf, labels, distance, S);
+        std::cout << E << '\n';
     }
 
     // render final image
-    cv::Mat output_image;
+    cv::Mat output_image = render_output(labf, labels);
 
     cv::imshow("image", output_image);
     cv::waitKey(0);
