@@ -1,28 +1,10 @@
-#include <opencv2/opencv.hpp>
-#include <Eigen/Dense>
-#include <iostream>
+#include "slic/core.hpp"
+
 #include <cmath>
-#include <string>
 #include <algorithm>
 #include <array>
+#include <utility>
 #include <vector>
-#include <stdexcept>
-
-
-struct Cluster { // better than class for data
-    float L, a, b; // CIELAB colors
-    int x, y; // center coords
-    int label;
-    Cluster(int label_, float L_, float a_, float b_, int x_, int y_)
-        : label(label_), L(L_), a(a_), b(b_), x(x_), y(y_) {}
-};
-
-
-int compute_s(int rows, int cols, int k){
-    if (k <= 0) return 1; // division 0 not good :(
-    return std::max(1, (int)std::floor(std::sqrt((rows * cols) / (double)k)));
-}
-
 
 
 std::vector<Cluster> init_clusters(const cv::Mat& laplacian,
@@ -84,42 +66,11 @@ std::vector<Cluster> init_clusters(const cv::Mat& laplacian,
 
 
 
-/* Loads image into CIELAB format from file path */
-cv::Mat img_to_labf(const std::string& img_path){ // "image.png"
-    cv::Mat img = cv::imread(img_path, cv::IMREAD_COLOR);
-    if (img.empty()) return cv::Mat();
-
-    cv::Mat lab;
-    cv::cvtColor(img, lab, cv::COLOR_BGR2Lab);
-    
-    cv::Mat labf;
-    lab.convertTo(labf, CV_32FC3);
-    
-    return labf;
-}
-
-cv::Mat gradient_map(const std::string& img_path){ // useful for clusters init
-    cv::Mat img = cv::imread(img_path, cv::IMREAD_GRAYSCALE);
-    CV_Assert(!img.empty());
-
-    cv::Mat lap;
-    cv::Laplacian(img, lap, CV_32F, 3);
-
-    return cv::abs(lap);
-}
-
-Eigen::MatrixXf lab_to_grid(const cv::Mat& lab){
-    Eigen::MatrixXf grid(lab.rows, lab.cols);
-    return grid;
-}
-
-
-
 float compute_distance(Cluster c, int xi, int yi, float Li, float ai, float bi, int S){
     float dc2 = pow(c.L - Li,2) + pow(c.a - ai,2) + pow(c.b - bi, 2);
     float ds2 = pow(c.x - xi,2) + pow(c.y - yi, 2);
 
-    int m = 10; // can be [1,40] when working with CIELAB
+    int m = 35; // can be [1,40] when working with CIELAB
 
     float D = sqrt(dc2 + ((ds2 / pow(S,2)) * pow(m,2)));
 
@@ -199,6 +150,7 @@ float update_clusters(std::vector<Cluster>& clusters, const cv::Mat& labf, // ma
 }
 
 
+
 /* runs one iteration of the algorithm and returns the residual error */
 float slic(std::vector<Cluster>& clusters,
         const cv::Mat& labf,
@@ -240,72 +192,4 @@ float slic(std::vector<Cluster>& clusters,
     float E = update_clusters(clusters, labf, labels);  // residual error
     
     return E;
-}
-
-
-
-cv::Mat render_output(const cv::Mat& labf,
-                    const Eigen::MatrixXf& labels) // actually maybe not const
-{
-    // cv::convexHull surement pour commencer
-    // need to fix  pixels that do not belong to the same connected component as their cluster center may remain (C. Post Processing section)
-    // draw a 1px border around each cluster
-    cv::Mat output_image = labf.clone();
-    const int rows = output_image.rows;
-    const int cols = output_image.cols;
-
-    for (int y = 0; y < rows-1; y++){
-        for (int x = 0; x < cols-1; x++){
-            int l = labels(y, x);
-            if (l != labels(y+1, x) || l != labels(y, x+1)){
-                output_image.at<cv::Vec3f>(y, x) = cv::Vec3f(0.0, 0.0, 0.0);
-            }
-        }
-    }
-    // convert back labf to bgr
-    cv::Mat lab8, bgr;
-    output_image.convertTo(lab8, CV_8UC3);
-    cv::cvtColor(lab8, bgr, cv::COLOR_Lab2BGR);
-    return bgr;
-}
-
-
-
-
-int main() {
-    // loading image
-    std::string image_path = "banana.png";
-    const cv::Mat labf = img_to_labf(image_path); // can access it fast just to get values, it will not change
-    const cv::Mat laplacian = gradient_map(image_path);
-    if (labf.empty()) return -1;
-
-    const int r = laplacian.rows; // if can be const then it must be const
-    const int c = laplacian.cols;
-
-    const int n_pixels = 100; // k
-    const int S = compute_s(r, c, n_pixels); // find size for sampling pixels at regular grid steps S
-
-    // Initialise cluster centers Ck, clusters will change their centers as the algorithm runs
-    std::vector<Cluster> clusters = init_clusters(laplacian, labf, n_pixels, S);
-
-    // Label and Distance map to track l(i) and d(i)
-    Eigen::MatrixXf labels = lab_to_grid(labf);
-    labels.setConstant(-1);
-    Eigen::MatrixXf distance = lab_to_grid(labf);
-    distance.setConstant(INFINITY);
-
-    //Slic
-    const float threshold = 5; // fix later also f(image size)
-    float E = threshold+1; // residual error
-    while (E > threshold){
-        E = slic(clusters, labf, labels, distance, S);
-        std::cout << E << '\n';
-    }
-
-    // render final image
-    cv::Mat output_image = render_output(labf, labels);
-
-    cv::imshow("image", output_image);
-    cv::waitKey(0);
-    return 0;
 }
