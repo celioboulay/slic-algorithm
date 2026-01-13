@@ -14,7 +14,7 @@ Dependencies:
 
 ### Example at different resolutions:
 
-<img src="data/slicexemple.png" width="340">
+<img src="data/slicExemple.png" width="340">
 
 
 ---
