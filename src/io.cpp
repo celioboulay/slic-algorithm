@@ -2,7 +2,7 @@
 
 
 /* Loads image into CIELAB format from file path */
-cv::Mat img_to_labf(const std::string& img_path){ // "image.png"
+cv::Mat img_to_labf(const std::string& img_path){
     cv::Mat img = cv::imread(img_path, cv::IMREAD_COLOR);
     if (img.empty()) return cv::Mat();
 

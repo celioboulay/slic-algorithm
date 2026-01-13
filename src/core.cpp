@@ -77,13 +77,9 @@ float compute_distance(Cluster c, int xi, int yi, float Li, float ai, float bi, 
     return D;
 }
 
-float L2_norm(){ // L2 norm is used to compute a residual error E
-    return 0;
-}
 
-
-float update_clusters(std::vector<Cluster>& clusters, const cv::Mat& labf, // may need to optimize later
-                    Eigen::MatrixXf& labels) // will return the residual error E 
+float update_clusters(std::vector<Cluster>& clusters, const cv::Mat& labf, 
+                    Eigen::MatrixXf& labels)
 {
     /* for each pixel somme cluster correspondant
     keep how much pixels in each clusters et hop on divise. */

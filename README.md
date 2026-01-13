@@ -6,7 +6,16 @@ Implementation of the Simple Linear Iterative Clustering superpixel algorithm in
 Dependencies:
 - C++17
 - OpenCV is used for image I/O and color space conversion.  
-- Eigen is used for dense grids (labels / distances).
+- Eigen is used for matrices.
+
+
+---
+
+
+### Example at different resolutions:
+
+<img src="data/slicexemple.png" width="340">
+
 
 ---
 

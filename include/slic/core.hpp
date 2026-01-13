@@ -11,8 +11,6 @@ std::vector<Cluster> init_clusters(const cv::Mat& laplacian,
 
 float compute_distance(Cluster c, int xi, int yi, float Li, float ai, float bi, int S);
 
-float L2_norm();
-
 float update_clusters(std::vector<Cluster>& clusters, const cv::Mat& labf,
                     Eigen::MatrixXf& labels);
 

@@ -17,16 +17,16 @@
 
 int main() {
 
-    std::string image_path = "../data/banana.png";
+    std::string image_path = "../data/elmer.png";
     const cv::Mat labf = img_to_labf(image_path);
     const cv::Mat laplacian = gradient_map(image_path);
     if (labf.empty()) return -1;
 
 
-    const int n_pixels = 150; // k also should depend on the grid size
-    const int S = compute_s(laplacian.rows, laplacian.cols, n_pixels); // find size for sampling pixels at regular grid steps S
+    const int n_pixels = 100; // k also should depend on the grid size
+    const int S = compute_s(laplacian.rows, laplacian.cols, n_pixels); // sampling pixels at regular grid steps S
 
-    // Initialise cluster centers Ck, clusters will change their centers as the algorithm runs
+    // Initialise cluster centers Ck, SLIC will update them
     std::vector<Cluster> clusters = init_clusters(laplacian, labf, n_pixels, S);
 
     // Label and Distance map to track l(i) and d(i)
@@ -35,8 +35,8 @@ int main() {
     Eigen::MatrixXf distance = lab_to_grid(labf);
     distance.setConstant(INFINITY);
 
-    //Slic
-    const float threshold = 10; // fix later also f(image size)
+    // SLIC
+    const float threshold = 40; // fix later also f(image size)
     float E = threshold+1; // residual error
     while (E > threshold){
         E = slic(clusters, labf, labels, distance, S);
